@@ -7,7 +7,7 @@ export default function PhotoPreviewModal({ photo, meta, onClose }) {
   const handleSave = useCallback(async () => {
     setSaveState('saving');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `dazz-${timestamp}.jpg`;
+    const filename = `retrooo-cam-${timestamp}.jpg`;
 
     const { method } = await savePhoto(photo, filename);
 
@@ -32,7 +32,7 @@ export default function PhotoPreviewModal({ photo, meta, onClose }) {
         <p className="mt-3 text-center font-mono text-[11px] tracking-widest text-body-black/60">
           {meta
             ? `${meta.filterLabel.toUpperCase()} · ISO ${meta.iso}${meta.flashFired ? ' · FLASH' : ''}`
-            : 'DEVELOPED ON DAZZ'}
+            : 'DEVELOPED ON RETROOO CAM'}
         </p>
       </div>
 
