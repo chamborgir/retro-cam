@@ -1,0 +1,20 @@
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies
+node_modules
+.pnpm-store
+
+# Production build output
+dist
+dist-ssr
+
+# Local environment & tool caches
+.env
+.env.local
+.env.*.local
+.vercel
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
