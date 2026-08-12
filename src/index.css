@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------
+   Design tokens — "disposable film camera" identity
+   Palette pulled from worn camera-body leatherette, brushed metal,
+   and warm Kodak Gold chemistry — not a generic dark-mode default.
+--------------------------------------------------------------------- */
+:root {
+  --body-black: #12100d;      /* camera shell */
+  --panel-brown: #211a14;     /* leatherette panel */
+  --panel-brown-light: #2f261d;
+  --metal: #8a8478;           /* brushed aluminum trim */
+  --metal-light: #b7b0a1;
+  --cream: #ede3d3;           /* viewfinder / LCD backlight */
+  --lcd-amber: #f2c14e;       /* status readouts, date stamp */
+  --film-orange: #e4672b;     /* shutter accent, light leak */
+  --film-red: #d94f3d;        /* rec dot / warning */
+  --grain-line: rgba(237, 227, 211, 0.08);
+}
+
+@theme {
+  --font-display: "Oswald", "Arial Narrow", sans-serif;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
+
+  --color-body-black: var(--body-black);
+  --color-panel-brown: var(--panel-brown);
+  --color-panel-brown-light: var(--panel-brown-light);
+  --color-metal: var(--metal);
+  --color-metal-light: var(--metal-light);
+  --color-cream: var(--cream);
+  --color-lcd-amber: var(--lcd-amber);
+  --color-film-orange: var(--film-orange);
+  --color-film-red: var(--film-red);
+}
+
+html, body, #root {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--body-black);
+  color: var(--cream);
+  font-family: var(--font-mono);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* faint leatherette cross-hatch texture on camera-body panels */
+.leatherette {
+  background-image:
+    repeating-linear-gradient(45deg, var(--grain-line) 0, var(--grain-line) 1px, transparent 1px, transparent 6px),
+    repeating-linear-gradient(-45deg, var(--grain-line) 0, var(--grain-line) 1px, transparent 1px, transparent 6px);
+}
+
+/* blinking rec-style dot used near the frame counter */
+@keyframes blink-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.blink-dot {
+  animation: blink-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes shutter-flash {
+  0% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+.shutter-flash {
+  animation: shutter-flash 220ms ease-out forwards;
+}
+
+/* prevent iOS bounce/scroll on the camera screen */
+.no-scroll {
+  position: fixed;
+  inset: 0;
+  height: 100vh;   /* fallback for older iOS Safari */
+  height: 100dvh;  /* accounts for the collapsing/expanding iOS toolbar */
+  overflow: hidden;
+}
+
+/* clear the iPhone notch / home indicator without hardcoding a device */
+.safe-top {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+.safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+@keyframes countdown-pulse {
+  0% { transform: scale(0.6); opacity: 0; }
+  30% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.countdown-pulse {
+  animation: countdown-pulse 1s ease-out;
+}
