@@ -10,7 +10,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *    / Android Chrome when switching cameras or unmounting)
  *  - exposes a simple `switchCamera()` toggle and error state for a
  *    denied-permission / no-camera-found UI
- *  - provides simulated screen flash timing for front-facing captures
  */
 export function useCamera() {
     const videoRef = useRef(null);
@@ -20,7 +19,9 @@ export function useCamera() {
     const [isReady, setIsReady] = useState(false);
     const [error, setError] = useState(null);
     const [torchSupported, setTorchSupported] = useState(false);
-    const [isFlashing, setIsFlashing] = useState(false);
+    // null = no hardware zoom exposed by this device/browser, so
+    // CameraView falls back to a CSS/canvas software zoom instead.
+    const [zoomCapabilities, setZoomCapabilities] = useState(null);
 
     const stopStream = useCallback(() => {
         if (streamRef.current) {
@@ -34,6 +35,7 @@ export function useCamera() {
             setError(null);
             setIsReady(false);
             setTorchSupported(false);
+            setZoomCapabilities(null);
 
             // Stop any existing tracks BEFORE requesting new ones — requesting
             // a new stream while the old one still holds the device is what
@@ -86,6 +88,19 @@ export function useCamera() {
                     ? track.getCapabilities()
                     : {};
                 setTorchSupported(!!capabilities.torch);
+                // Hardware zoom (via applyConstraints) is only reliably exposed on
+                // Chromium-based mobile browsers for the rear camera. When it's
+                // missing we report null and CameraView falls back to a software
+                // crop instead — this never blocks capture.
+                setZoomCapabilities(
+                    capabilities.zoom
+                        ? {
+                              min: capabilities.zoom.min,
+                              max: capabilities.zoom.max,
+                              step: capabilities.zoom.step || 0.1,
+                          }
+                        : null,
+                );
 
                 setIsReady(true);
             } catch (err) {
@@ -131,30 +146,24 @@ export function useCamera() {
     }, []);
 
     /**
-     * Prolonged Screen Flash for Front Camera:
-     * 1. Displays FULL WHITE screen immediately.
-     * 2. Holds white screen for 300ms so display panel reaches max luminance AND
-     *    front camera sensor auto-adjusts gain/exposure to light up the face.
-     * 3. Executes capture function WHILE white screen is active.
-     * 4. Keeps white screen on for an additional 150ms post-capture before turning off.
+     * Apply hardware zoom, when the track exposes a `zoom` capability.
+     * Always resolves (never throws) — callers should treat a `false`
+     * return as "fall back to the software crop instead".
      */
-    const captureWithScreenFlash = useCallback(async (captureFn) => {
-        // 1. Turn ON prolonged white screen flash
-        setIsFlashing(true);
-
-        // 2. Wait 300ms for prolonged full brightness & sensor exposure sync
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        // 3. CAPTURE IMAGE NOW (while screen is completely bright white)
-        if (typeof captureFn === "function") {
-            await captureFn();
+    const setZoom = useCallback(async (value) => {
+        const track = streamRef.current?.getVideoTracks?.()[0];
+        if (!track) return false;
+        const capabilities = track.getCapabilities
+            ? track.getCapabilities()
+            : {};
+        if (!capabilities.zoom) return false;
+        try {
+            await track.applyConstraints({ advanced: [{ zoom: value }] });
+            return true;
+        } catch (err) {
+            console.warn("[useCamera] hardware zoom failed", err);
+            return false;
         }
-
-        // 4. Hold flash briefly post-capture so it feels like a real camera shutter flash
-        await new Promise((resolve) => setTimeout(resolve, 150));
-
-        // 5. Turn OFF white screen flash
-        setIsFlashing(false);
     }, []);
 
     const switchCamera = useCallback(() => {
@@ -201,7 +210,7 @@ export function useCamera() {
         retry: () => startStream(facingMode),
         torchSupported,
         setTorch,
-        isFlashing,
-        captureWithScreenFlash,
+        zoomCapabilities,
+        setZoom,
     };
 }

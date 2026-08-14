@@ -69,6 +69,15 @@ body {
   animation: shutter-flash 220ms ease-out forwards;
 }
 
+.flash-overlay {
+  opacity: 0;
+  transition: opacity 250ms ease-out;
+}
+.flash-overlay.flash-on {
+  opacity: 1;
+  transition: opacity 50ms ease-in;
+}
+
 /* prevent iOS bounce/scroll on the camera screen */
 .no-scroll {
   position: fixed;

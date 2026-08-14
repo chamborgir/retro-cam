@@ -10,6 +10,21 @@ import {
     DEFAULT_FLASH,
     getStock,
 } from "../utils/filmStocks";
+import {
+    APERTURE_OPTIONS,
+    DEFAULT_APERTURE_FSTOP,
+    getAperture,
+    EXPOSURE_STEPS,
+    DEFAULT_EXPOSURE,
+    WHITE_BALANCE_OPTIONS,
+    DEFAULT_WHITE_BALANCE,
+    getWhiteBalance,
+    RATIO_OPTIONS,
+    DEFAULT_RATIO_ID,
+    getRatio,
+    ZOOM_LEVELS,
+    DEFAULT_ZOOM,
+} from "../utils/cameraSettings";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TIMER_OPTIONS = [0, 3, 10];
@@ -92,6 +107,42 @@ const LevelIcon = ({ active }) => (
     </svg>
 );
 
+const SettingsIcon = () => (
+    <svg
+        viewBox="0 0 24 24"
+        className="h-4 w-4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+    >
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </svg>
+);
+
+// small chip row used inside the settings drawer
+const SettingRow = ({ label, children }) => (
+    <div>
+        <div className="mb-1.5 font-mono text-[9px] tracking-widest text-metal-light">
+            {label}
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">{children}</div>
+    </div>
+);
+
+const Chip = ({ active, onClick, label }) => (
+    <button
+        onClick={onClick}
+        className={`flex-shrink-0 rounded-full border px-3 py-1 font-mono text-[10px] tracking-wide transition ${
+            active
+                ? "border-film-orange bg-film-orange/20 text-lcd-amber"
+                : "border-metal/50 text-metal-light"
+        }`}
+    >
+        {label}
+    </button>
+);
+
 const flashLabel = { off: "OFF", auto: "AUTO", on: "ON" };
 
 export default function CameraView({ onCapture, framesLeft, disabled }) {
@@ -104,12 +155,13 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
         retry,
         torchSupported,
         setTorch,
+        zoomCapabilities,
+        setZoom,
     } = useCamera();
     const level = useLevel();
 
     const [isCapturing, setIsCapturing] = useState(false);
     const [flashVisual, setFlashVisual] = useState(false);
-    const [isFlashing, setIsFlashing] = useState(false);
     const [countdown, setCountdown] = useState(null);
     const countdownTimer = useRef(null);
 
@@ -118,11 +170,55 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
     const [flashMode, setFlashMode] = useState(DEFAULT_FLASH);
     const [timerSeconds, setTimerSeconds] = useState(0);
     const [showGrid, setShowGrid] = useState(false);
-    const [showFilters, setShowFilters] = useState(false);
+    const [apertureFstop, setApertureFstop] = useState(DEFAULT_APERTURE_FSTOP);
+    const [exposureEv, setExposureEv] = useState(DEFAULT_EXPOSURE);
+    const [whiteBalanceId, setWhiteBalanceId] = useState(DEFAULT_WHITE_BALANCE);
+    const [ratioId, setRatioId] = useState(DEFAULT_RATIO_ID);
+    const [activeDrawer, setActiveDrawer] = useState("none"); // 'none' | 'filters' | 'settings'
+
+    // Digital zoom — rear camera only. When the track exposes a hardware
+    // `zoom` capability we drive that directly (sharpest result, no
+    // software crop needed); otherwise we fall back to a CSS transform
+    // for the live preview and a matching canvas crop at capture time.
+    const [zoom, setZoomLevel] = useState(DEFAULT_ZOOM);
+    const [hardwareZoomApplied, setHardwareZoomApplied] = useState(false);
+    const isBackCamera = facingMode === "environment";
 
     const stock = getStock(stockId);
+    const aperture = getAperture(apertureFstop);
+    const whiteBalance = getWhiteBalance(whiteBalanceId);
+    const ratioConfig = getRatio(ratioId);
+
+    // Combined live-preview filter: film stock look + white balance tint +
+    // a brightness() term approximating aperture light-gain * exposure EV.
+    // (The aperture's background blur is a capture-time-only effect — it's
+    // too expensive to fake live on full-res video, so it only shows up in
+    // the developed photo.)
+    const previewBrightness =
+        aperture.brightness * Math.pow(2, exposureEv * 0.6);
+    const previewFilter =
+        `${stock.previewFilter} ${whiteBalance.previewFilter} brightness(${previewBrightness.toFixed(3)})`.trim();
 
     useEffect(() => () => clearInterval(countdownTimer.current), []);
+
+    // Front camera has no zoom control — reset back to 1x whenever we
+    // land on it (e.g. after switchCamera), so software crop math never
+    // runs stale on a frame it doesn't apply to.
+    useEffect(() => {
+        if (!isBackCamera) {
+            setZoomLevel(DEFAULT_ZOOM);
+            setHardwareZoomApplied(false);
+        }
+    }, [isBackCamera]);
+
+    const handleZoomChange = useCallback(
+        async (level) => {
+            setZoomLevel(level);
+            const usedHardware = await setZoom(level);
+            setHardwareZoomApplied(usedHardware);
+        },
+        [setZoom],
+    );
 
     const cycleIso = useCallback(() => {
         setIso((current) => {
@@ -145,20 +241,39 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
         });
     }, []);
 
+    const toggleDrawer = useCallback((name) => {
+        setActiveDrawer((current) => (current === name ? "none" : name));
+    }, []);
+
     // The actual capture pipeline — separated from the shutter handler so
     // the self-timer can call it once the countdown reaches zero.
     const runCapture = useCallback(async () => {
         setIsCapturing(true);
         const video = videoRef.current;
         const willFlash = shouldFireFlash(video, flashMode);
-        const canUseTorch =
-            willFlash && torchSupported && facingMode === "environment";
+        const isFrontCam = facingMode === "user";
+
+        // Back camera: prefer the real hardware torch when it's available.
+        const canUseTorch = willFlash && torchSupported && !isFrontCam;
+        // Front camera: no torch exists, so the bright screen IS the flash —
+        // a real light source that actually illuminates the subject's face.
+        // We never edit pixels to fake this one.
+        const useScreenFlash = willFlash && isFrontCam;
+        // Back camera with no torch support: only remaining option is a
+        // software brightness boost baked into the captured pixels.
+        const useSoftwareBoost = willFlash && !isFrontCam && !canUseTorch;
 
         try {
             if (canUseTorch) {
                 await setTorch(true);
                 await sleep(180);
-            } else if (willFlash) {
+            } else if (useScreenFlash) {
+                // Prolong the white screen so it has time to actually light up
+                // the subject before we grab the frame, then hold briefly after
+                // capture too so it reads as a real flash, not a UI blip.
+                setFlashVisual(true);
+                await sleep(300);
+            } else if (useSoftwareBoost) {
                 setFlashVisual(true);
                 await sleep(90);
             }
@@ -167,22 +282,38 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                 facingMode,
                 stockId,
                 iso,
-                applyFlash: willFlash && !canUseTorch,
+                apertureFstop,
+                exposureEv,
+                whiteBalanceId,
+                ratio: ratioConfig.value,
+                zoom,
+                hardwareZoomApplied,
+                applyFlash: useSoftwareBoost,
             });
 
             if (canUseTorch) await setTorch(false);
+            if (useScreenFlash) await sleep(150);
 
             await sleep(450); // "developing" beat
             onCapture({
                 dataUrl,
-                meta: { filterLabel: stock.label, iso, flashFired: willFlash },
+                meta: {
+                    filterLabel: stock.label,
+                    iso,
+                    flashFired: willFlash,
+                    aperture: apertureFstop,
+                    exposureEv,
+                    whiteBalanceLabel: whiteBalance.label,
+                    ratioLabel: ratioConfig.label,
+                    ratioValue: ratioConfig.value,
+                },
             });
         } catch (err) {
             console.error("[CameraView] capture failed", err);
             if (canUseTorch) await setTorch(false);
         } finally {
             setIsCapturing(false);
-            setTimeout(() => setFlashVisual(false), 220);
+            setFlashVisual(false);
         }
     }, [
         videoRef,
@@ -194,6 +325,13 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
         iso,
         stock.label,
         onCapture,
+        apertureFstop,
+        exposureEv,
+        whiteBalanceId,
+        whiteBalance.label,
+        ratioConfig,
+        zoom,
+        hardwareZoomApplied,
     ]);
 
     const handleShutter = useCallback(() => {
@@ -241,9 +379,7 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                     <span
                         className={`h-1.5 w-1.5 rounded-full bg-film-red ${isReady && !error ? "blink-dot" : ""}`}
                     />
-                    <span className="font-display font-semibold">
-                        RETROOO CAM
-                    </span>
+                    <span className="font-display font-semibold">DAZZ</span>
                 </div>
                 <div className="flex items-center gap-3 font-mono text-[11px] tracking-wide">
                     <span>{facingMode === "user" ? "FRONT" : "BACK"}</span>
@@ -256,20 +392,34 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
 
             {/* ---------------- Viewfinder ---------------- */}
             <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-black">
-                <div className="relative aspect-[3/4] h-full max-h-full w-full overflow-hidden bg-black sm:h-auto sm:max-h-[calc(100dvh-13rem)] sm:w-auto">
+                <div
+                    className="relative h-full max-h-full w-full overflow-hidden bg-black sm:h-auto sm:max-h-[calc(100dvh-13rem)] sm:w-auto"
+                    style={{ aspectRatio: ratioConfig.value }}
+                >
                     <video
                         ref={videoRef}
                         playsInline
                         muted
                         autoPlay
-                        style={{ filter: stock.previewFilter }}
-                        className={`h-full w-full object-cover transition-[filter] duration-200 ${facingMode === "user" ? "scale-x-[-1]" : ""}`}
+                        style={{
+                            filter: previewFilter,
+                            transform: [
+                                facingMode === "user" ? "scaleX(-1)" : "",
+                                isBackCamera && zoom > 1 && !hardwareZoomApplied
+                                    ? `scale(${zoom})`
+                                    : "",
+                            ]
+                                .filter(Boolean)
+                                .join(" "),
+                        }}
+                        className="h-full w-full object-cover transition-[filter,transform] duration-200"
                     />
 
-                    {/* capture flash */}
-                    {flashVisual && (
-                        <div className="pointer-events-none absolute inset-0 bg-cream shutter-flash" />
-                    )}
+                    {/* capture flash — always mounted so the CSS opacity transition
+              can actually animate; toggled via the flash-on class */}
+                    <div
+                        className={`pointer-events-none absolute inset-0 z-10 bg-cream flash-overlay ${flashVisual ? "flash-on" : ""}`}
+                    />
 
                     {/* rule-of-thirds grid */}
                     {showGrid && (
@@ -328,7 +478,7 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                     )}
 
                     {/* ---- composition aids: timer / grid / level (left) ---- */}
-                    {!showFilters && (
+                    {activeDrawer === "none" && (
                         <div className="absolute left-3 top-3 flex flex-col items-start gap-2">
                             <button
                                 onClick={cycleTimer}
@@ -358,8 +508,8 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                         </div>
                     )}
 
-                    {/* ---- shooting settings strip: flash / filter / iso (right) ---- */}
-                    {!showFilters && (
+                    {/* ---- shooting settings strip: flash / iso / more / film (right) ---- */}
+                    {activeDrawer === "none" && (
                         <div className="absolute right-3 top-3 flex flex-col items-end gap-2">
                             <button
                                 onClick={cycleFlash}
@@ -375,7 +525,14 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                                 ISO {iso}
                             </button>
                             <button
-                                onClick={() => setShowFilters(true)}
+                                onClick={() => toggleDrawer("settings")}
+                                className="flex items-center gap-1.5 rounded-full bg-body-black/60 px-2.5 py-1 font-mono text-[10px] tracking-widest text-cream backdrop-blur-sm"
+                            >
+                                <SettingsIcon />
+                                MORE
+                            </button>
+                            <button
+                                onClick={() => toggleDrawer("filters")}
                                 className="flex items-center gap-1.5 rounded-full bg-body-black/60 px-2.5 py-1 font-mono text-[10px] tracking-widest text-cream backdrop-blur-sm"
                             >
                                 <span
@@ -384,6 +541,25 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                                 />
                                 FILM
                             </button>
+                        </div>
+                    )}
+
+                    {/* zoom level pills — rear camera only */}
+                    {activeDrawer === "none" && isBackCamera && (
+                        <div className="pointer-events-auto absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-body-black/60 p-1 backdrop-blur-sm">
+                            {ZOOM_LEVELS.map((level) => (
+                                <button
+                                    key={level}
+                                    onClick={() => handleZoomChange(level)}
+                                    className={`rounded-full px-2.5 py-1 font-mono text-[10px] tracking-wide transition ${
+                                        zoom === level
+                                            ? "bg-film-orange text-body-black font-semibold"
+                                            : "text-cream"
+                                    }`}
+                                >
+                                    {level}x
+                                </button>
+                            ))}
                         </div>
                     )}
 
@@ -421,15 +597,15 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                 </div>
             </div>
 
-            {/* ---------------- Filter drawer (swipeable filmstrip) ---------------- */}
-            {showFilters && (
+            {/* ---------------- Film filter drawer (swipeable filmstrip) ---------------- */}
+            {activeDrawer === "filters" && (
                 <div className="leatherette border-t border-panel-brown-light bg-panel-brown px-4 py-3">
                     <div className="mb-2 flex items-center justify-between">
                         <span className="font-mono text-[10px] tracking-widest text-metal-light">
                             CHOOSE FILM STOCK
                         </span>
                         <button
-                            onClick={() => setShowFilters(false)}
+                            onClick={() => setActiveDrawer("none")}
                             className="font-mono text-[10px] tracking-widest text-lcd-amber"
                         >
                             DONE
@@ -458,6 +634,67 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                             </button>
                         ))}
                     </div>
+                </div>
+            )}
+
+            {/* ---------------- Settings drawer: aperture / exposure / white balance ---------------- */}
+            {activeDrawer === "settings" && (
+                <div className="leatherette max-h-72 space-y-3 overflow-y-auto border-t border-panel-brown-light bg-panel-brown px-4 py-3">
+                    <div className="flex items-center justify-between">
+                        <span className="font-mono text-[10px] tracking-widest text-metal-light">
+                            CAMERA SETTINGS
+                        </span>
+                        <button
+                            onClick={() => setActiveDrawer("none")}
+                            className="font-mono text-[10px] tracking-widest text-lcd-amber"
+                        >
+                            DONE
+                        </button>
+                    </div>
+
+                    <SettingRow label="APERTURE">
+                        {APERTURE_OPTIONS.map((a) => (
+                            <Chip
+                                key={a.fstop}
+                                active={apertureFstop === a.fstop}
+                                onClick={() => setApertureFstop(a.fstop)}
+                                label={`f/${a.fstop}`}
+                            />
+                        ))}
+                    </SettingRow>
+
+                    <SettingRow label="EXPOSURE">
+                        {EXPOSURE_STEPS.map((ev) => (
+                            <Chip
+                                key={ev}
+                                active={exposureEv === ev}
+                                onClick={() => setExposureEv(ev)}
+                                label={ev > 0 ? `+${ev}` : `${ev}`}
+                            />
+                        ))}
+                    </SettingRow>
+
+                    <SettingRow label="WHITE BALANCE">
+                        {WHITE_BALANCE_OPTIONS.map((w) => (
+                            <Chip
+                                key={w.id}
+                                active={whiteBalanceId === w.id}
+                                onClick={() => setWhiteBalanceId(w.id)}
+                                label={w.label}
+                            />
+                        ))}
+                    </SettingRow>
+
+                    <SettingRow label="ASPECT RATIO">
+                        {RATIO_OPTIONS.map((r) => (
+                            <Chip
+                                key={r.id}
+                                active={ratioId === r.id}
+                                onClick={() => setRatioId(r.id)}
+                                label={r.label}
+                            />
+                        ))}
+                    </SettingRow>
                 </div>
             )}
 
@@ -515,12 +752,6 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                     </span>
                 </div>
             </div>
-            {isFlashing && (
-                <div
-                    className="fixed inset-0 bg-white z-[99999] pointer-events-none"
-                    style={{ backgroundColor: "#ffffff" }}
-                />
-            )}
         </div>
     );
 }

@@ -1,12 +1,12 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-    plugins: [react(), tailwindcss()],
-    server: {
-        host: true,
-        allowedHosts: ["pretty-gifts-smoke.loca.lt"],
-    },
-});
+  plugins: [react(), tailwindcss()],
+  server: {
+    // --host exposes on your LAN so you can open the dev server from your phone
+    host: true,
+  },
+})
