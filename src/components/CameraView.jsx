@@ -379,7 +379,9 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                     <span
                         className={`h-1.5 w-1.5 rounded-full bg-film-red ${isReady && !error ? "blink-dot" : ""}`}
                     />
-                    <span className="font-display font-semibold">DAZZ</span>
+                    <span className="font-display font-semibold">
+                        RETROOO CAM
+                    </span>
                 </div>
                 <div className="flex items-center gap-3 font-mono text-[11px] tracking-wide">
                     <span>{facingMode === "user" ? "FRONT" : "BACK"}</span>
