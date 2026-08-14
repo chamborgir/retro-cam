@@ -22,6 +22,13 @@ export function useCamera() {
     // null = no hardware zoom exposed by this device/browser, so
     // CameraView falls back to a CSS/canvas software zoom instead.
     const [zoomCapabilities, setZoomCapabilities] = useState(null);
+    // Hardware exposure/white-balance support, when the browser exposes
+    // manual control over the real sensor. Null means "not supported here"
+    // — CameraView treats that as the signal to fall back to the canvas
+    // software pipeline instead.
+    const [exposureCapabilities, setExposureCapabilities] = useState(null);
+    const [whiteBalanceCapabilities, setWhiteBalanceCapabilities] =
+        useState(null);
 
     const stopStream = useCallback(() => {
         if (streamRef.current) {
@@ -36,6 +43,8 @@ export function useCamera() {
             setIsReady(false);
             setTorchSupported(false);
             setZoomCapabilities(null);
+            setExposureCapabilities(null);
+            setWhiteBalanceCapabilities(null);
 
             // Stop any existing tracks BEFORE requesting new ones — requesting
             // a new stream while the old one still holds the device is what
@@ -98,6 +107,34 @@ export function useCamera() {
                               min: capabilities.zoom.min,
                               max: capabilities.zoom.max,
                               step: capabilities.zoom.step || 0.1,
+                          }
+                        : null,
+                );
+
+                // Manual exposure compensation — requires both the range AND
+                // 'manual' listed as a supported exposureMode. Many phones
+                // report a compensation range but only support 'continuous',
+                // in which case applyConstraints silently rejects it.
+                setExposureCapabilities(
+                    capabilities.exposureCompensation &&
+                        capabilities.exposureMode?.includes?.("manual")
+                        ? {
+                              min: capabilities.exposureCompensation.min,
+                              max: capabilities.exposureCompensation.max,
+                              step:
+                                  capabilities.exposureCompensation.step || 0.1,
+                          }
+                        : null,
+                );
+
+                // Manual white balance via colorTemperature (Kelvin) — same
+                // "range exists AND manual mode is listed" check.
+                setWhiteBalanceCapabilities(
+                    capabilities.colorTemperature &&
+                        capabilities.whiteBalanceMode?.includes?.("manual")
+                        ? {
+                              min: capabilities.colorTemperature.min,
+                              max: capabilities.colorTemperature.max,
                           }
                         : null,
                 );
@@ -166,6 +203,78 @@ export function useCamera() {
         }
     }, []);
 
+    /**
+     * Push manual exposure compensation to the real sensor, when the
+     * device/browser supports it. Resolves `false` on anything — missing
+     * capability, rejected constraint, unsupported browser — so the
+     * caller's failsafe is just "if this isn't true, do it in canvas
+     * instead."
+     */
+    const setHardwareExposure = useCallback(async (ev, capabilities) => {
+        const track = streamRef.current?.getVideoTracks?.()[0];
+        if (!track || !capabilities) return false;
+        try {
+            const value = Math.max(
+                capabilities.min,
+                Math.min(capabilities.max, ev),
+            );
+            await track.applyConstraints({
+                advanced: [
+                    { exposureMode: "manual", exposureCompensation: value },
+                ],
+            });
+            return true;
+        } catch (err) {
+            console.warn(
+                "[useCamera] hardware exposure failed, falling back to software",
+                err,
+            );
+            return false;
+        }
+    }, []);
+
+    /**
+     * Push a manual white-balance Kelvin target to the real sensor.
+     * `kelvin === null` means "auto" — switches the track back to
+     * continuous white balance rather than setting a temperature.
+     * Same always-resolves, false-means-fall-back-to-canvas contract as
+     * setHardwareExposure.
+     */
+    const setHardwareWhiteBalance = useCallback(
+        async (kelvin, capabilities) => {
+            const track = streamRef.current?.getVideoTracks?.()[0];
+            if (!track || !capabilities) return false;
+            try {
+                if (kelvin == null) {
+                    await track.applyConstraints({
+                        advanced: [{ whiteBalanceMode: "continuous" }],
+                    });
+                } else {
+                    const value = Math.max(
+                        capabilities.min,
+                        Math.min(capabilities.max, kelvin),
+                    );
+                    await track.applyConstraints({
+                        advanced: [
+                            {
+                                whiteBalanceMode: "manual",
+                                colorTemperature: value,
+                            },
+                        ],
+                    });
+                }
+                return true;
+            } catch (err) {
+                console.warn(
+                    "[useCamera] hardware white balance failed, falling back to software",
+                    err,
+                );
+                return false;
+            }
+        },
+        [],
+    );
+
     const switchCamera = useCallback(() => {
         setFacingMode((prev) => {
             const next = prev === "user" ? "environment" : "user";
@@ -212,5 +321,9 @@ export function useCamera() {
         setTorch,
         zoomCapabilities,
         setZoom,
+        exposureCapabilities,
+        setHardwareExposure,
+        whiteBalanceCapabilities,
+        setHardwareWhiteBalance,
     };
 }
