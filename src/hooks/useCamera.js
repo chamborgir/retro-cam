@@ -29,6 +29,7 @@ export function useCamera() {
     const [exposureCapabilities, setExposureCapabilities] = useState(null);
     const [whiteBalanceCapabilities, setWhiteBalanceCapabilities] =
         useState(null);
+    const [isoCapabilities, setIsoCapabilities] = useState(null);
 
     const stopStream = useCallback(() => {
         if (streamRef.current) {
@@ -45,6 +46,7 @@ export function useCamera() {
             setZoomCapabilities(null);
             setExposureCapabilities(null);
             setWhiteBalanceCapabilities(null);
+            setIsoCapabilities(null);
 
             // Stop any existing tracks BEFORE requesting new ones — requesting
             // a new stream while the old one still holds the device is what
@@ -135,6 +137,21 @@ export function useCamera() {
                         ? {
                               min: capabilities.colorTemperature.min,
                               max: capabilities.colorTemperature.max,
+                          }
+                        : null,
+                );
+
+                // Manual ISO — same "range exists AND manual exposure mode is
+                // listed" gate as exposure compensation (ISO is part of the
+                // manual-exposure triad on the few browsers that expose it at
+                // all, mostly Android Chrome).
+                setIsoCapabilities(
+                    capabilities.iso &&
+                        capabilities.exposureMode?.includes?.("manual")
+                        ? {
+                              min: capabilities.iso.min,
+                              max: capabilities.iso.max,
+                              step: capabilities.iso.step || 1,
                           }
                         : null,
                 );
@@ -275,6 +292,34 @@ export function useCamera() {
         [],
     );
 
+    /**
+     * Push a manual ISO value to the real sensor, when supported. Same
+     * always-resolves / false-means-fall-back-to-canvas-grain contract.
+     * Sets exposureMode: 'manual' alongside it — on the handful of
+     * devices that expose ISO at all, it lives under the same manual-
+     * exposure umbrella as exposureCompensation.
+     */
+    const setHardwareIso = useCallback(async (isoValue, capabilities) => {
+        const track = streamRef.current?.getVideoTracks?.()[0];
+        if (!track || !capabilities) return false;
+        try {
+            const value = Math.max(
+                capabilities.min,
+                Math.min(capabilities.max, isoValue),
+            );
+            await track.applyConstraints({
+                advanced: [{ exposureMode: "manual", iso: value }],
+            });
+            return true;
+        } catch (err) {
+            console.warn(
+                "[useCamera] hardware ISO failed, falling back to software grain",
+                err,
+            );
+            return false;
+        }
+    }, []);
+
     const switchCamera = useCallback(() => {
         setFacingMode((prev) => {
             const next = prev === "user" ? "environment" : "user";
@@ -325,5 +370,7 @@ export function useCamera() {
         setHardwareExposure,
         whiteBalanceCapabilities,
         setHardwareWhiteBalance,
+        isoCapabilities,
+        setHardwareIso,
     };
 }

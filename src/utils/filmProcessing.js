@@ -636,6 +636,14 @@ export function developPhoto(video, options) {
     if (grain > 0) applyFilmGrain(ctx, width, height, grain);
 
     if (!stock.noLightLeak) applyLightLeak(ctx, width, height, stock);
+    applyVignette(ctx, width, height, stock.vignette);
+    if (stock.starFlare)
+        applyStarFlare(
+            ctx,
+            width,
+            height,
+            stock.starFlare === true ? {} : stock.starFlare,
+        );
     if (stock.prismGhost) applyPrismGhost(ctx, width, height);
 
     applyDateStamp(ctx, width, height);

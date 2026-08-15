@@ -1,15 +1,33 @@
 import { useCallback, useState } from "react";
 import { savePhoto, isIOS } from "../utils/savePhoto";
+import { composeWithInfoPrint } from "../utils/polaroidFrame";
 
 export default function PhotoPreviewModal({ photo, meta, onClose }) {
     const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
+    // "info" bakes the cream border + settings caption into the saved
+    // file (what the preview below already looks like); "pure" saves
+    // just the developed frame, no border or text.
+    const [saveMode, setSaveMode] = useState("info");
 
     const handleSave = useCallback(async () => {
         setSaveState("saving");
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const filename = `dazz-${timestamp}.jpg`;
 
-        const { method } = await savePhoto(photo, filename);
+        let toSave = photo;
+        if (saveMode === "info") {
+            try {
+                toSave = await composeWithInfoPrint(photo, meta);
+            } catch (err) {
+                console.warn(
+                    "[PhotoPreviewModal] failed to compose info print, saving pure image instead",
+                    err,
+                );
+                toSave = photo;
+            }
+        }
+
+        const { method } = await savePhoto(toSave, filename);
 
         if (method === "cancelled") {
             setSaveState("idle");
@@ -17,7 +35,7 @@ export default function PhotoPreviewModal({ photo, meta, onClose }) {
         }
         setSaveState("saved");
         setTimeout(() => setSaveState("idle"), 1800);
-    }, [photo]);
+    }, [photo, meta, saveMode]);
 
     const buttonLabel =
         saveState === "saving"
@@ -61,7 +79,30 @@ export default function PhotoPreviewModal({ photo, meta, onClose }) {
                 )}
             </div>
 
-            <div className="mt-8 flex w-full max-w-sm items-center gap-3">
+            <div className="mt-5 flex w-full max-w-sm items-center justify-center gap-2">
+                <button
+                    onClick={() => setSaveMode("info")}
+                    className={`rounded-full border px-3.5 py-1.5 font-mono text-[10px] tracking-widest transition ${
+                        saveMode === "info"
+                            ? "border-film-orange bg-film-orange/20 text-lcd-amber"
+                            : "border-metal/50 text-metal-light"
+                    }`}
+                >
+                    WITH INFO
+                </button>
+                <button
+                    onClick={() => setSaveMode("pure")}
+                    className={`rounded-full border px-3.5 py-1.5 font-mono text-[10px] tracking-widest transition ${
+                        saveMode === "pure"
+                            ? "border-film-orange bg-film-orange/20 text-lcd-amber"
+                            : "border-metal/50 text-metal-light"
+                    }`}
+                >
+                    PURE IMAGE
+                </button>
+            </div>
+
+            <div className="mt-4 flex w-full max-w-sm items-center gap-3">
                 <button
                     onClick={onClose}
                     className="flex-1 rounded-full border border-metal-light px-4 py-3 font-mono text-xs tracking-widest text-cream transition active:scale-95"

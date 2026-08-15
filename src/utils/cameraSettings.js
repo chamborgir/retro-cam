@@ -35,13 +35,21 @@ export const DEFAULT_EXPOSURE = 0;
 // previewFilter is layered onto the live <video> so the viewfinder
 // roughly matches what will be baked into the photo.
 export const WHITE_BALANCE_OPTIONS = [
-    { id: "auto", label: "AUTO", rMul: 1, bMul: 1, previewFilter: "" },
+    {
+        id: "auto",
+        label: "AUTO",
+        rMul: 1,
+        bMul: 1,
+        previewFilter: "",
+        kelvin: null,
+    },
     {
         id: "daylight",
         label: "DAYLIGHT",
         rMul: 1.03,
         bMul: 0.97,
         previewFilter: "sepia(0.04)",
+        kelvin: 5500,
     },
     {
         id: "cloudy",
@@ -49,6 +57,7 @@ export const WHITE_BALANCE_OPTIONS = [
         rMul: 1.08,
         bMul: 0.93,
         previewFilter: "sepia(0.08)",
+        kelvin: 6500,
     },
     {
         id: "tungsten",
@@ -56,6 +65,7 @@ export const WHITE_BALANCE_OPTIONS = [
         rMul: 0.85,
         bMul: 1.18,
         previewFilter: "hue-rotate(6deg)",
+        kelvin: 3200,
     },
     {
         id: "fluorescent",
@@ -63,6 +73,7 @@ export const WHITE_BALANCE_OPTIONS = [
         rMul: 0.94,
         bMul: 1.08,
         previewFilter: "hue-rotate(-4deg)",
+        kelvin: 4000,
     },
 ];
 export const DEFAULT_WHITE_BALANCE = "auto";
@@ -88,7 +99,7 @@ export const getRatio = (id) =>
 // preferred when the device/browser exposes a `zoom` capability;
 // otherwise CameraView falls back to a software crop done in
 // developPhoto's step 2.
-export const ZOOM_LEVELS = [1, 1.5, 2, 3];
+export const ZOOM_LEVELS = [0.5, 1, 1.5, 2, 3];
 export const DEFAULT_ZOOM = 1;
 // 0.5x ("ultra-wide") is only physically meaningful when the hardware
 // itself reports it's reachable — there's no such thing as a software

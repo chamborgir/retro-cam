@@ -22,8 +22,10 @@ import {
     RATIO_OPTIONS,
     DEFAULT_RATIO_ID,
     getRatio,
-    ZOOM_LEVELS,
     DEFAULT_ZOOM,
+    getAvailableZoomLevels,
+    mapToHardwareRange,
+    mapIsoToHardwareRange,
 } from "../utils/cameraSettings";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -121,10 +123,21 @@ const SettingsIcon = () => (
 );
 
 // small chip row used inside the settings drawer
-const SettingRow = ({ label, children }) => (
+const SettingRow = ({ label, badge, children }) => (
     <div>
-        <div className="mb-1.5 font-mono text-[9px] tracking-widest text-metal-light">
+        <div className="mb-1.5 flex items-center gap-1.5 font-mono text-[9px] tracking-widest text-metal-light">
             {label}
+            {badge && (
+                <span
+                    className={`rounded-full px-1.5 py-0.5 text-[8px] ${
+                        badge === "HW"
+                            ? "bg-film-orange/25 text-lcd-amber"
+                            : "bg-metal/25 text-metal-light"
+                    }`}
+                >
+                    {badge}
+                </span>
+            )}
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">{children}</div>
     </div>
@@ -157,6 +170,12 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
         setTorch,
         zoomCapabilities,
         setZoom,
+        exposureCapabilities,
+        setHardwareExposure,
+        isoCapabilities,
+        setHardwareIso,
+        whiteBalanceCapabilities,
+        setHardwareWhiteBalance,
     } = useCamera();
     const level = useLevel();
 
@@ -183,6 +202,17 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
     const [zoom, setZoomLevel] = useState(DEFAULT_ZOOM);
     const [hardwareZoomApplied, setHardwareZoomApplied] = useState(false);
     const isBackCamera = facingMode === "environment";
+
+    // Manual exposure/ISO/white-balance are attempted on the real sensor
+    // first (see useCamera's setHardwareExposure/setHardwareIso/
+    // setHardwareWhiteBalance). Each of these flags is the failsafe
+    // switch: true only when the hardware call actually succeeded, so
+    // developPhoto knows whether it still needs to do that adjustment
+    // in canvas or whether the sensor already did it for real.
+    const [hardwareExposureApplied, setHardwareExposureApplied] =
+        useState(false);
+    const [hardwareWhiteBalanceApplied, setHardwareWhiteBalanceApplied] =
+        useState(false);
 
     const stock = getStock(stockId);
     const aperture = getAperture(apertureFstop);
@@ -211,21 +241,68 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
         }
     }, [isBackCamera]);
 
+    useEffect(() => {
+        if (!exposureCapabilities) setHardwareExposureApplied(false);
+    }, [exposureCapabilities]);
+
+    useEffect(() => {
+        if (!whiteBalanceCapabilities) setHardwareWhiteBalanceApplied(false);
+    }, [whiteBalanceCapabilities]);
+
     const handleZoomChange = useCallback(
         async (level) => {
             setZoomLevel(level);
             const usedHardware = await setZoom(level);
             setHardwareZoomApplied(usedHardware);
+            // 0.5x only exists as real hardware — there's no wider frame to
+            // crop into in software. If the device advertised it but the
+            // constraint still failed at the moment we needed it, fall back
+            // to 1x rather than silently shooting un-zoomed at "0.5x".
+            if (level < 1 && !usedHardware) {
+                setZoomLevel(1);
+                setHardwareZoomApplied(false);
+            }
         },
         [setZoom],
+    );
+
+    const handleExposureChange = useCallback(
+        async (ev) => {
+            setExposureEv(ev);
+            const value = mapToHardwareRange(ev, -2, 2, exposureCapabilities);
+            const usedHardware = await setHardwareExposure(
+                value,
+                exposureCapabilities,
+            );
+            setHardwareExposureApplied(usedHardware);
+        },
+        [exposureCapabilities, setHardwareExposure],
+    );
+
+    const handleWhiteBalanceChange = useCallback(
+        async (option) => {
+            setWhiteBalanceId(option.id);
+            const usedHardware = await setHardwareWhiteBalance(
+                option.kelvin,
+                whiteBalanceCapabilities,
+            );
+            setHardwareWhiteBalanceApplied(usedHardware);
+        },
+        [whiteBalanceCapabilities, setHardwareWhiteBalance],
     );
 
     const cycleIso = useCallback(() => {
         setIso((current) => {
             const idx = ISO_VALUES.indexOf(current);
-            return ISO_VALUES[(idx + 1) % ISO_VALUES.length];
+            const next = ISO_VALUES[(idx + 1) % ISO_VALUES.length];
+            // Best-effort — doesn't gate anything downstream, since the
+            // retro film-grain overlay always applies for the look
+            // regardless of whether the real sensor also went along.
+            const mapped = mapIsoToHardwareRange(next, isoCapabilities);
+            setHardwareIso(mapped, isoCapabilities);
+            return next;
         });
-    }, []);
+    }, [isoCapabilities, setHardwareIso]);
 
     const cycleFlash = useCallback(() => {
         const order = ["off", "auto", "on"];
@@ -289,6 +366,8 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                 zoom,
                 hardwareZoomApplied,
                 applyFlash: useSoftwareBoost,
+                skipExposure: hardwareExposureApplied,
+                skipWhiteBalance: hardwareWhiteBalanceApplied,
             });
 
             if (canUseTorch) await setTorch(false);
@@ -332,6 +411,8 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
         ratioConfig,
         zoom,
         hardwareZoomApplied,
+        hardwareExposureApplied,
+        hardwareWhiteBalanceApplied,
     ]);
 
     const handleShutter = useCallback(() => {
@@ -379,9 +460,7 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                     <span
                         className={`h-1.5 w-1.5 rounded-full bg-film-red ${isReady && !error ? "blink-dot" : ""}`}
                     />
-                    <span className="font-display font-semibold">
-                        RETROOO CAM
-                    </span>
+                    <span className="font-display font-semibold">DAZZ</span>
                 </div>
                 <div className="flex items-center gap-3 font-mono text-[11px] tracking-wide">
                     <span>{facingMode === "user" ? "FRONT" : "BACK"}</span>
@@ -549,19 +628,21 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                     {/* zoom level pills — rear camera only */}
                     {activeDrawer === "none" && isBackCamera && (
                         <div className="pointer-events-auto absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-body-black/60 p-1 backdrop-blur-sm">
-                            {ZOOM_LEVELS.map((level) => (
-                                <button
-                                    key={level}
-                                    onClick={() => handleZoomChange(level)}
-                                    className={`rounded-full px-2.5 py-1 font-mono text-[10px] tracking-wide transition ${
-                                        zoom === level
-                                            ? "bg-film-orange text-body-black font-semibold"
-                                            : "text-cream"
-                                    }`}
-                                >
-                                    {level}x
-                                </button>
-                            ))}
+                            {getAvailableZoomLevels(zoomCapabilities).map(
+                                (level) => (
+                                    <button
+                                        key={level}
+                                        onClick={() => handleZoomChange(level)}
+                                        className={`rounded-full px-2.5 py-1 font-mono text-[10px] tracking-wide transition ${
+                                            zoom === level
+                                                ? "bg-film-orange text-body-black font-semibold"
+                                                : "text-cream"
+                                        }`}
+                                    >
+                                        {level}x
+                                    </button>
+                                ),
+                            )}
                         </div>
                     )}
 
@@ -665,23 +746,29 @@ export default function CameraView({ onCapture, framesLeft, disabled }) {
                         ))}
                     </SettingRow>
 
-                    <SettingRow label="EXPOSURE">
+                    <SettingRow
+                        label="EXPOSURE"
+                        badge={exposureCapabilities ? "HW" : "SW"}
+                    >
                         {EXPOSURE_STEPS.map((ev) => (
                             <Chip
                                 key={ev}
                                 active={exposureEv === ev}
-                                onClick={() => setExposureEv(ev)}
+                                onClick={() => handleExposureChange(ev)}
                                 label={ev > 0 ? `+${ev}` : `${ev}`}
                             />
                         ))}
                     </SettingRow>
 
-                    <SettingRow label="WHITE BALANCE">
+                    <SettingRow
+                        label="WHITE BALANCE"
+                        badge={whiteBalanceCapabilities ? "HW" : "SW"}
+                    >
                         {WHITE_BALANCE_OPTIONS.map((w) => (
                             <Chip
                                 key={w.id}
                                 active={whiteBalanceId === w.id}
-                                onClick={() => setWhiteBalanceId(w.id)}
+                                onClick={() => handleWhiteBalanceChange(w)}
                                 label={w.label}
                             />
                         ))}
